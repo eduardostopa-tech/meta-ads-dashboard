@@ -1,6 +1,5 @@
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-// Todas as contas EXCETO: CURSO, ESPANHOL, Mirian Vaz, Andrea Morato
 const ACCOUNTS_STANDARD = [
   "2068758496936007","1219387043022426","390840644907537","619963795160015",
   "828394427632542","1852353518254493","457659635494933","748613300967995",
@@ -11,15 +10,11 @@ const ACCOUNTS_STANDARD = [
   "1211196206223589","826364873694747","517693170661722","2341241392960174"
 ];
 
-// Contas com pixel customizado
-const ACCOUNTS_PIXEL = ["611835967744109", "1594192167835660"];
+const ACCOUNTS_PIXEL = ["611835967744109","1594192167835660"];
 
-// Nomes a excluir da query padrão (caso apareçam por conta duplicada)
 const EXCLUDE_NAMES = [
-  "nathalia kassis [curso]",
-  "nathalia kassis [espanhol]",
-  "dra mirian vaz",
-  "dra andrea morato"
+  "nathalia kassis [curso]","nathalia kassis [espanhol]",
+  "dra mirian vaz","dra andrea morato"
 ];
 
 const FIELDS_STANDARD = [
@@ -57,35 +52,70 @@ async function fetchWindsor(accounts, fields, dateFrom, dateTo) {
   return json.data || [];
 }
 
-function normalizeStandard(row) {
-  return {
-    account_name: row.account_name || "",
-    conversas: row.actions_onsite_conversion_messaging_conversation_started_7d || 0,
-    cpr: row.cost_per_action_type_onsite_conversion_messaging_conversation_started_7d || 0,
-    link_clicks: row.link_clicks || 0, cpc: row.cpc || 0, ctr: row.ctr || 0,
-    ctr_link: row.unique_link_clicks_ctr || 0, spend: row.spend || 0,
-    reach: row.reach || 0, frequency: row.frequency || 0,
-    impressions: row.impressions || 0, cpm: row.cpm || 0,
-    metric_label: "Conversas (Msg)",
-  };
-}
+// Agrupa linhas por account_name, somando métricas de volume e recalculando médias ponderadas
+function aggregateByAccount(rows, isPixel) {
+  const map = {};
 
-function normalizePixel(row) {
-  return {
-    account_name: row.account_name || "",
-    conversas: row.actions_offsite_conversion_fb_pixel_custom || 0,
-    cpr: row.cost_per_action_type_offsite_conversion_fb_pixel_custom || 0,
-    link_clicks: row.link_clicks || 0, cpc: row.cpc || 0, ctr: row.ctr || 0,
-    ctr_link: row.unique_link_clicks_ctr || 0, spend: row.spend || 0,
-    reach: row.reach || 0, frequency: row.frequency || 0,
-    impressions: row.impressions || 0, cpm: row.cpm || 0,
-    metric_label: "Conv. Pixel Custom",
-  };
+  for (const row of rows) {
+    const name = row.account_name || "";
+    if (!name) continue;
+    if (EXCLUDE_NAMES.includes(name.toLowerCase())) continue;
+
+    if (!map[name]) {
+      map[name] = {
+        account_name: name,
+        conversas: 0, link_clicks: 0, spend: 0,
+        reach: 0, impressions: 0,
+        metric_label: isPixel ? "Conv. Pixel Custom" : "Conversas (Msg)",
+        // para médias ponderadas
+        _cpc_sum: 0, _ctr_sum: 0, _ctr_link_sum: 0,
+        _cpm_sum: 0, _freq_sum: 0, _count: 0,
+      };
+    }
+
+    const m = map[name];
+    m.conversas += isPixel
+      ? (row.actions_offsite_conversion_fb_pixel_custom || 0)
+      : (row.actions_onsite_conversion_messaging_conversation_started_7d || 0);
+    m.link_clicks += row.link_clicks || 0;
+    m.spend += row.spend || 0;
+    m.reach += row.reach || 0;
+    m.impressions += row.impressions || 0;
+
+    // acumula para médias ponderadas por impressões
+    const imp = row.impressions || 0;
+    m._cpc_sum += (row.cpc || 0) * imp;
+    m._ctr_sum += (row.ctr || 0) * imp;
+    m._ctr_link_sum += (row.unique_link_clicks_ctr || 0) * imp;
+    m._cpm_sum += (row.cpm || 0) * imp;
+    m._freq_sum += (row.frequency || 0) * imp;
+    m._count += imp;
+  }
+
+  return Object.values(map).map(m => {
+    const n = m._count || 1;
+    const cpr = m.conversas > 0 ? m.spend / m.conversas : 0;
+    return {
+      account_name: m.account_name,
+      conversas: m.conversas,
+      cpr,
+      link_clicks: m.link_clicks,
+      cpc: m._cpc_sum / n,
+      ctr: m._ctr_sum / n,
+      ctr_link: m._ctr_link_sum / n,
+      spend: m.spend,
+      reach: m.reach,
+      frequency: m._freq_sum / n,
+      impressions: m.impressions,
+      cpm: m._cpm_sum / n,
+      metric_label: m.metric_label,
+    };
+  });
 }
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "no-store"); // sem cache para garantir dados frescos
+  res.setHeader("Cache-Control", "no-store");
 
   try {
     const current = getDateRange(1);
@@ -98,15 +128,19 @@ export default async function handler(req, res) {
       fetchWindsor(ACCOUNTS_PIXEL, FIELDS_PIXEL, prev.from, prev.to),
     ]);
 
-    // Filtra nomes excluídos da query padrão (segurança dupla)
-    const filterStd = (arr) => arr.filter(r =>
-      !EXCLUDE_NAMES.includes((r.account_name || "").toLowerCase())
-    );
-
     res.status(200).json({
-      current: [...filterStd(stdCurr).map(normalizeStandard), ...pixelCurr.map(normalizePixel)],
-      prev: [...filterStd(stdPrev).map(normalizeStandard), ...pixelPrev.map(normalizePixel)],
-      periods: { current: `${current.from} → ${current.to}`, prev: `${prev.from} → ${prev.to}` }
+      current: [
+        ...aggregateByAccount(stdCurr, false),
+        ...aggregateByAccount(pixelCurr, true),
+      ],
+      prev: [
+        ...aggregateByAccount(stdPrev, false),
+        ...aggregateByAccount(pixelPrev, true),
+      ],
+      periods: {
+        current: `${current.from} → ${current.to}`,
+        prev: `${prev.from} → ${prev.to}`,
+      }
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
