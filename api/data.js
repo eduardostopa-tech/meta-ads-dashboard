@@ -1,5 +1,6 @@
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
+// Contas padrão (conversas por mensagem)
 const ACCOUNTS_STANDARD = [
   "2068758496936007","1219387043022426","390840644907537","619963795160015",
   "828394427632542","1852353518254493","457659635494933","748613300967995",
@@ -10,11 +11,13 @@ const ACCOUNTS_STANDARD = [
   "1211196206223589","826364873694747","517693170661722","2341241392960174"
 ];
 
-const ACCOUNTS_PIXEL = ["611835967744109","1594192167835660"];
+// Contas pixel custom - nomes exatos como vêm do Windsor
+const PIXEL_ACCOUNT_NAMES = ["Dra Mirian Vaz", "Dra Andrea Morato"];
 
+// Contas a excluir completamente
 const EXCLUDE_NAMES = [
-  "nathalia kassis [curso]","nathalia kassis [espanhol]",
-  "dra mirian vaz","dra andrea morato"
+  "nathalia kassis [curso]",
+  "nathalia kassis [espanhol]"
 ];
 
 const FIELDS_STANDARD = [
@@ -52,24 +55,23 @@ async function fetchWindsor(accounts, fields, dateFrom, dateTo) {
   return json.data || [];
 }
 
-// Agrupa linhas por account_name, somando métricas de volume e recalculando médias ponderadas
-function aggregateByAccount(rows, isPixel) {
+// Agrega linhas por account_name, somando volumes e recalculando médias ponderadas
+function aggregateRows(rows, isPixel, allowedNames = null) {
   const map = {};
 
   for (const row of rows) {
-    const name = row.account_name || "";
+    const name = (row.account_name || "").trim();
     if (!name) continue;
     if (EXCLUDE_NAMES.includes(name.toLowerCase())) continue;
+    // Se allowedNames definido, só aceita esses nomes (filtro pixel)
+    if (allowedNames && !allowedNames.includes(name)) continue;
 
     if (!map[name]) {
       map[name] = {
         account_name: name,
-        conversas: 0, link_clicks: 0, spend: 0,
-        reach: 0, impressions: 0,
+        conversas: 0, link_clicks: 0, spend: 0, reach: 0, impressions: 0,
         metric_label: isPixel ? "Conv. Pixel Custom" : "Conversas (Msg)",
-        // para médias ponderadas
-        _cpc_sum: 0, _ctr_sum: 0, _ctr_link_sum: 0,
-        _cpm_sum: 0, _freq_sum: 0, _count: 0,
+        _cpc_w: 0, _ctr_w: 0, _ctr_link_w: 0, _cpm_w: 0, _freq_w: 0, _imp_total: 0,
       };
     }
 
@@ -78,36 +80,34 @@ function aggregateByAccount(rows, isPixel) {
       ? (row.actions_offsite_conversion_fb_pixel_custom || 0)
       : (row.actions_onsite_conversion_messaging_conversation_started_7d || 0);
     m.link_clicks += row.link_clicks || 0;
-    m.spend += row.spend || 0;
-    m.reach += row.reach || 0;
+    m.spend       += row.spend || 0;
+    m.reach       += row.reach || 0;
     m.impressions += row.impressions || 0;
 
-    // acumula para médias ponderadas por impressões
     const imp = row.impressions || 0;
-    m._cpc_sum += (row.cpc || 0) * imp;
-    m._ctr_sum += (row.ctr || 0) * imp;
-    m._ctr_link_sum += (row.unique_link_clicks_ctr || 0) * imp;
-    m._cpm_sum += (row.cpm || 0) * imp;
-    m._freq_sum += (row.frequency || 0) * imp;
-    m._count += imp;
+    m._cpc_w      += (row.cpc || 0) * imp;
+    m._ctr_w      += (row.ctr || 0) * imp;
+    m._ctr_link_w += (row.unique_link_clicks_ctr || 0) * imp;
+    m._cpm_w      += (row.cpm || 0) * imp;
+    m._freq_w     += (row.frequency || 0) * imp;
+    m._imp_total  += imp;
   }
 
   return Object.values(map).map(m => {
-    const n = m._count || 1;
-    const cpr = m.conversas > 0 ? m.spend / m.conversas : 0;
+    const n = m._imp_total || 1;
     return {
       account_name: m.account_name,
-      conversas: m.conversas,
-      cpr,
-      link_clicks: m.link_clicks,
-      cpc: m._cpc_sum / n,
-      ctr: m._ctr_sum / n,
-      ctr_link: m._ctr_link_sum / n,
-      spend: m.spend,
-      reach: m.reach,
-      frequency: m._freq_sum / n,
-      impressions: m.impressions,
-      cpm: m._cpm_sum / n,
+      conversas:    m.conversas,
+      cpr:          m.conversas > 0 ? m.spend / m.conversas : 0,
+      link_clicks:  m.link_clicks,
+      cpc:          m._cpc_w / n,
+      ctr:          m._ctr_w / n,
+      ctr_link:     m._ctr_link_w / n,
+      spend:        m.spend,
+      reach:        m.reach,
+      frequency:    m._freq_w / n,
+      impressions:  m.impressions,
+      cpm:          m._cpm_w / n,
       metric_label: m.metric_label,
     };
   });
@@ -119,27 +119,30 @@ export default async function handler(req, res) {
 
   try {
     const current = getDateRange(1);
-    const prev = getDateRange(8);
+    const prev    = getDateRange(8);
 
     const [stdCurr, pixelCurr, stdPrev, pixelPrev] = await Promise.all([
       fetchWindsor(ACCOUNTS_STANDARD, FIELDS_STANDARD, current.from, current.to),
-      fetchWindsor(ACCOUNTS_PIXEL, FIELDS_PIXEL, current.from, current.to),
-      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_STANDARD, prev.from, prev.to),
-      fetchWindsor(ACCOUNTS_PIXEL, FIELDS_PIXEL, prev.from, prev.to),
+      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_PIXEL,    current.from, current.to), // mesmas contas, campo diferente
+      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_STANDARD, prev.from,    prev.to),
+      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_PIXEL,    prev.from,    prev.to),
     ]);
+
+    // Standard: todas as contas EXCETO as de pixel
+    const allExceptPixel = n => !PIXEL_ACCOUNT_NAMES.includes(n) && !EXCLUDE_NAMES.includes(n.toLowerCase());
 
     res.status(200).json({
       current: [
-        ...aggregateByAccount(stdCurr, false),
-        ...aggregateByAccount(pixelCurr, true),
+        ...aggregateRows(stdCurr.filter(r => allExceptPixel(r.account_name)), false),
+        ...aggregateRows(pixelCurr, true, PIXEL_ACCOUNT_NAMES), // só Mirian e Andrea
       ],
       prev: [
-        ...aggregateByAccount(stdPrev, false),
-        ...aggregateByAccount(pixelPrev, true),
+        ...aggregateRows(stdPrev.filter(r => allExceptPixel(r.account_name)), false),
+        ...aggregateRows(pixelPrev, true, PIXEL_ACCOUNT_NAMES),
       ],
       periods: {
         current: `${current.from} → ${current.to}`,
-        prev: `${prev.from} → ${prev.to}`,
+        prev:    `${prev.from} → ${prev.to}`,
       }
     });
   } catch (err) {
