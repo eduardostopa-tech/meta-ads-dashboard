@@ -1,18 +1,40 @@
 const WINDSOR_API_KEY = process.env.WINDSOR_API_KEY;
 
-// Contas excluídas: Nathalia Kassis [CURSO] e Nathalia Kassis [ESPANHOL]
+// Contas padrão (conversas por mensagem) - SEM CURSO, ESPANHOL, Mirian Vaz, Andrea Morato
 const ACCOUNTS_STANDARD = [
-  "2068758496936007","1219387043022426","390840644907537","619963795160015",
-  "828394427632542","1852353518254493","457659635494933","748613300967995",
-  "1019229360015655","329557496405271","4458721077543979","1594192167835660",
-  "437604455903564","772332721021119","1098725998109493","672538531656415",
-  "1271165120214474","315895234514279","672538531656415","1632184990552904",
-  "407828064482317","1374235873039705","1529560257488038","636872863427692",
-  "1211196206223589","826364873694747","517693170661722","2341241392960174"
+  "2068758496936007", // CMD Olhos CA 1.1.2
+  "1219387043022426", // CMD Olhos CA 1.1.1
+  "390840644907537",  // Dra. Camila Machado
+  "619963795160015",  // Natasha - Antiga Convênios
+  "828394427632542",  // Lumiata
+  "1852353518254493", // Clinica Crepaldi
+  "457659635494933",  // CA Dr. Robson
+  "748613300967995",  // CA Dra Cristiane
+  "1019229360015655", // Dra Daniela Ribeiro
+  "329557496405271",  // Dra Lais Filadelfo
+  "4458721077543979", // Balmee
+  "437604455903564",  // CA Dra Bianca Duarte
+  "772332721021119",  // Dr Rogério Ferrari
+  "1098725998109493", // Dra Bruna Cotta
+  "672538531656415",  // CA Dra Sara Profeta
+  "1271165120214474", // Crepaldi Bela Laser
+  "315895234514279",  // Dra Desiree Hickmann
+  "1632184990552904", // Tebrine Fonseca
+  "407828064482317",  // CA Marcelo Cardoso
+  "1374235873039705", // Dra Priscila Marques Perin
+  "1529560257488038", // Spa Crepaldi
+  "636872863427692",  // Dr André Alves
+  "1211196206223589", // Clínica Personne
+  "826364873694747",  // Dr Alexandre César
+  "517693170661722",  // Nathalia Kassis [CLINICA]
+  "2341241392960174"  // CA Dra. Sara / outro
 ];
 
-// Contas com métrica de pixel customizado (sem conversas por mensagem)
-const ACCOUNTS_PIXEL = ["611835967744109", "1594192167835660"]; // Dra Mirian Vaz, Dra Andrea Morato
+// Contas pixel custom (Dra Mirian Vaz e Dra Andrea Morato)
+const ACCOUNTS_PIXEL = [
+  "611835967744109",  // Dra Mirian Vaz
+  "1594192167835660"  // Dra Andrea Morato
+];
 
 const FIELDS_STANDARD = [
   "account_name",
@@ -106,29 +128,15 @@ export default async function handler(req, res) {
       fetchWindsor(ACCOUNTS_PIXEL, FIELDS_PIXEL, prev.from, prev.to),
     ]);
 
-    // Merge e remover duplicatas (Dra Andrea Morato está em ACCOUNTS_STANDARD também)
-    const currentMerged = [
-      ...stdCurr.filter(r => !ACCOUNTS_PIXEL.includes(r.account_id)).map(normalizeStandard),
-      ...pixelCurr.map(normalizePixel),
-    ];
-    const prevMerged = [
-      ...stdPrev.filter(r => !ACCOUNTS_PIXEL.includes(r.account_id)).map(normalizeStandard),
-      ...pixelPrev.map(normalizePixel),
-    ];
-
-    // Remove duplicatas por nome (caso Dra Andrea Morato venha dos dois)
-    const dedup = (arr) => {
-      const seen = new Set();
-      return arr.filter(r => {
-        if (seen.has(r.account_name)) return false;
-        seen.add(r.account_name);
-        return true;
-      });
-    };
-
     res.status(200).json({
-      current: dedup(currentMerged),
-      prev: dedup(prevMerged),
+      current: [
+        ...stdCurr.map(normalizeStandard),
+        ...pixelCurr.map(normalizePixel),
+      ],
+      prev: [
+        ...stdPrev.map(normalizeStandard),
+        ...pixelPrev.map(normalizePixel),
+      ],
       periods: {
         current: `${current.from} → ${current.to}`,
         prev: `${prev.from} → ${prev.to}`,
