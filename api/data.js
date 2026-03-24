@@ -14,6 +14,9 @@ const ACCOUNTS_STANDARD = [
 // Contas pixel custom - nomes exatos como vêm do Windsor
 const PIXEL_ACCOUNT_NAMES = ["Dra Mirian Vaz", "Dra Andrea Morato"];
 
+// Contas com métrica "Contato no Site"
+const CONTACT_ACCOUNT_NAMES = ["CA - Dr. Robson"];
+
 // Contas a excluir completamente
 const EXCLUDE_NAMES = [
   "nathalia kassis [curso]",
@@ -32,6 +35,14 @@ const FIELDS_PIXEL = [
   "account_name",
   "actions_offsite_conversion_fb_pixel_custom",
   "cost_per_action_type_offsite_conversion_fb_pixel_custom",
+  "link_clicks","cpc","ctr","unique_link_clicks_ctr",
+  "spend","reach","frequency","impressions","cpm"
+].join(",");
+
+const FIELDS_CONTACT = [
+  "account_name",
+  "actions_contact",
+  "cost_per_action_type_contact",
   "link_clicks","cpc","ctr","unique_link_clicks_ctr",
   "spend","reach","frequency","impressions","cpm"
 ].join(",");
@@ -55,30 +66,30 @@ async function fetchWindsor(accounts, fields, dateFrom, dateTo) {
   return json.data || [];
 }
 
-// Agrega linhas por account_name, somando volumes e recalculando médias ponderadas
-function aggregateRows(rows, isPixel, allowedNames = null) {
+// type: "msg" | "pixel" | "contact"
+function aggregateRows(rows, type, allowedNames = null) {
   const map = {};
 
   for (const row of rows) {
     const name = (row.account_name || "").trim();
     if (!name) continue;
     if (EXCLUDE_NAMES.includes(name.toLowerCase())) continue;
-    // Se allowedNames definido, só aceita esses nomes (filtro pixel)
     if (allowedNames && !allowedNames.includes(name)) continue;
 
     if (!map[name]) {
       map[name] = {
         account_name: name,
         conversas: 0, link_clicks: 0, spend: 0, reach: 0, impressions: 0,
-        metric_label: isPixel ? "Conv. Pixel Custom" : "Conversas (Msg)",
+        metric_label: type === "pixel" ? "Conv. Pixel Custom" : type === "contact" ? "Contato no Site" : "Conversas (Msg)",
         _cpc_w: 0, _ctr_w: 0, _ctr_link_w: 0, _cpm_w: 0, _freq_w: 0, _imp_total: 0,
       };
     }
 
     const m = map[name];
-    m.conversas += isPixel
-      ? (row.actions_offsite_conversion_fb_pixel_custom || 0)
-      : (row.actions_onsite_conversion_messaging_conversation_started_7d || 0);
+    if (type === "pixel")        m.conversas += row.actions_offsite_conversion_fb_pixel_custom || 0;
+    else if (type === "contact") m.conversas += row.actions_contact || 0;
+    else                         m.conversas += row.actions_onsite_conversion_messaging_conversation_started_7d || 0;
+
     m.link_clicks += row.link_clicks || 0;
     m.spend       += row.spend || 0;
     m.reach       += row.reach || 0;
@@ -121,24 +132,28 @@ export default async function handler(req, res) {
     const current = getDateRange(1);
     const prev    = getDateRange(8);
 
-    const [stdCurr, pixelCurr, stdPrev, pixelPrev] = await Promise.all([
+    const [stdCurr, pixelCurr, contactCurr, stdPrev, pixelPrev, contactPrev] = await Promise.all([
       fetchWindsor(ACCOUNTS_STANDARD, FIELDS_STANDARD, current.from, current.to),
-      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_PIXEL,    current.from, current.to), // mesmas contas, campo diferente
+      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_PIXEL,    current.from, current.to),
+      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_CONTACT,  current.from, current.to),
       fetchWindsor(ACCOUNTS_STANDARD, FIELDS_STANDARD, prev.from,    prev.to),
       fetchWindsor(ACCOUNTS_STANDARD, FIELDS_PIXEL,    prev.from,    prev.to),
+      fetchWindsor(ACCOUNTS_STANDARD, FIELDS_CONTACT,  prev.from,    prev.to),
     ]);
 
-    // Standard: todas as contas EXCETO as de pixel
-    const allExceptPixel = n => !PIXEL_ACCOUNT_NAMES.includes(n) && !EXCLUDE_NAMES.includes(n.toLowerCase());
+    // Filtro: exclui pixel e contact das contas padrão
+    const stdOnly = n => !PIXEL_ACCOUNT_NAMES.includes(n) && !CONTACT_ACCOUNT_NAMES.includes(n) && !EXCLUDE_NAMES.includes(n.toLowerCase());
 
     res.status(200).json({
       current: [
-        ...aggregateRows(stdCurr.filter(r => allExceptPixel(r.account_name)), false),
-        ...aggregateRows(pixelCurr, true, PIXEL_ACCOUNT_NAMES), // só Mirian e Andrea
+        ...aggregateRows(stdCurr.filter(r => stdOnly(r.account_name)), "msg"),
+        ...aggregateRows(pixelCurr,   "pixel",   PIXEL_ACCOUNT_NAMES),
+        ...aggregateRows(contactCurr, "contact", CONTACT_ACCOUNT_NAMES),
       ],
       prev: [
-        ...aggregateRows(stdPrev.filter(r => allExceptPixel(r.account_name)), false),
-        ...aggregateRows(pixelPrev, true, PIXEL_ACCOUNT_NAMES),
+        ...aggregateRows(stdPrev.filter(r => stdOnly(r.account_name)), "msg"),
+        ...aggregateRows(pixelPrev,   "pixel",   PIXEL_ACCOUNT_NAMES),
+        ...aggregateRows(contactPrev, "contact", CONTACT_ACCOUNT_NAMES),
       ],
       periods: {
         current: `${current.from} → ${current.to}`,
