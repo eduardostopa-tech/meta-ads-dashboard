@@ -7,3 +7,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <App />
   </React.StrictMode>
 )
+
+// Remove a tela de loading nativa após o React montar
+if (typeof window.__hideAppLoader === 'function') {
+  window.__hideAppLoader()
+}
