@@ -126,7 +126,10 @@ export default function App() {
   useEffect(()=>{ fetchData(); },[]);
 
   const generateOpts = async () => {
-    if (!data) return;
+    if (!data || !data.current?.length) {
+      setOptError("Aguarde os dados do dashboard carregarem antes de gerar otimizações.");
+      return;
+    }
     setOptLoading(true); setOptError(null); setOpts(null);
     try {
       const curr = data.current || [];
@@ -139,12 +142,12 @@ export default function App() {
       const accounts = curr.map(r => {
         const p = prevMap[r.account_name] || {};
         const alerts = [];
-        if (r.frequency > 3)                          alerts.push("Frequência alta (>3)");
-        if (r.conversas === 0 && r.spend > 50)        alerts.push("Zero conversões com gasto");
-        if (r.cpr > avgCPR * 1.5 && r.cpr > 0)       alerts.push("CPR acima da média");
-        if (r.ctr < avgCTR * 0.6)                     alerts.push("CTR abaixo do benchmark");
-        if (r.spend > 300 && r.conversas < 3)         alerts.push("Gasto alto sem resultado");
-        if (p.reach && r.reach < p.reach * 0.8)       alerts.push("Alcance caindo WoW");
+        if (n(r.frequency) > 2.5)                              alerts.push("Frequência alta (>2.5)");
+        if (n(r.conversas) === 0 && n(r.spend) > 30)           alerts.push("Zero conversões com gasto");
+        if (n(r.cpr) > avgCPR * 1.3 && n(r.cpr) > 0)          alerts.push("CPR acima da média");
+        if (n(r.ctr) < avgCTR * 0.7 && n(r.impressions) > 500) alerts.push("CTR abaixo do benchmark");
+        if (n(r.spend) > 200 && n(r.conversas) < 5)            alerts.push("Gasto alto sem resultado");
+        if (p.reach && n(r.reach) < n(p.reach) * 0.85)         alerts.push("Alcance caindo WoW");
         return alerts.length ? {
           conta: r.account_name,
           tipo_conversao: r.metric_label,
@@ -375,10 +378,10 @@ Gere otimizações práticas para cada conta. Foque em ações concretas especí
                   <span key={a} style={{ fontSize:11, color:"#94a3b8", background:"rgba(255,255,255,0.04)", padding:"4px 10px", borderRadius:6, border:"1px solid rgba(255,255,255,0.07)" }}>{a}</span>
                 ))}
               </div>
-              {loading
-                ? <div style={{color:"#475569",fontSize:13}}>⏳ Aguardando dados do dashboard...</div>
+              {loading || curr.length === 0
+                ? <div style={{color:"#475569",fontSize:13}}>⏳ {loading ? "Aguardando dados do dashboard..." : "Carregando dados... atualize a página e tente novamente."}</div>
                 : <button onClick={generateOpts} style={{ padding:"13px 36px", borderRadius:10, border:"none", cursor:"pointer", background:"linear-gradient(135deg,#3b82f6,#6366f1)", color:"#fff", fontSize:14, fontWeight:800, boxShadow:"0 4px 24px rgba(59,130,246,0.35)", letterSpacing:"0.02em" }}>
-                    ✨ Gerar Otimizações com IA
+                    ✨ Gerar Otimizações com IA ({curr.length} contas)
                   </button>
               }
             </div>
