@@ -343,6 +343,7 @@ Gere otimizações práticas para cada conta. Foque em ações concretas especí
                       {r.account_name}
                       {r.metric_label==="Conv. Pixel Custom"&&<span style={{fontSize:9,color:"#a78bfa",marginLeft:6,background:"rgba(167,139,250,0.1)",padding:"1px 5px",borderRadius:3}}>PIXEL</span>}
                       {r.metric_label==="Contato no Site"&&<span style={{fontSize:9,color:"#34d399",marginLeft:6,background:"rgba(52,211,153,0.1)",padding:"1px 5px",borderRadius:3}}>CONTATO</span>}
+                      {r.metric_label==="EndForm"&&<span style={{fontSize:9,color:"#fb923c",marginLeft:6,background:"rgba(251,146,60,0.1)",padding:"1px 5px",borderRadius:3}}>ENDFORM</span>}
                     </td>
                     {cols.slice(1).map(c=>{
                       const cv=r[c.key]||0, pv=r.prev?(r.prev[c.key]||0):null;
