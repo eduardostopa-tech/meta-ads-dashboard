@@ -104,21 +104,24 @@ function aggregateRows(rows, type, allowedNames = null) {
     m._imp_total  += imp;
   }
 
+  const toNum = v => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
   return Object.values(map).map(m => {
-    const n = m._imp_total || 1;
+    const imp = m._imp_total || 1;
+    const conv = toNum(m.conversas);
+    const spend = toNum(m.spend);
     return {
       account_name: m.account_name,
-      conversas:    m.conversas,
-      cpr:          m.conversas > 0 ? m.spend / m.conversas : 0,
-      link_clicks:  m.link_clicks,
-      cpc:          m._cpc_w / n,
-      ctr:          m._ctr_w / n,
-      ctr_link:     m._ctr_link_w / n,
-      spend:        m.spend,
-      reach:        m.reach,
-      frequency:    m._freq_w / n,
-      impressions:  m.impressions,
-      cpm:          m._cpm_w / n,
+      conversas:    conv,
+      cpr:          conv > 0 ? spend / conv : 0,
+      link_clicks:  toNum(m.link_clicks),
+      cpc:          toNum(m._cpc_w) / imp,
+      ctr:          toNum(m._ctr_w) / imp,
+      ctr_link:     toNum(m._ctr_link_w) / imp,
+      spend:        spend,
+      reach:        toNum(m.reach),
+      frequency:    toNum(m._freq_w) / imp,
+      impressions:  toNum(m.impressions),
+      cpm:          toNum(m._cpm_w) / imp,
       metric_label: m.metric_label,
     };
   });

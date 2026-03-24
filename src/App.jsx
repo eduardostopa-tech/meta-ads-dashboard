@@ -1,15 +1,16 @@
 import { useState, useMemo, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
-const sum = (arr, key) => arr.reduce((a, b) => a + (b[key] || 0), 0);
-const pct = (curr, prev) => prev === 0 ? null : ((curr - prev) / prev) * 100;
+const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
+const sum = (arr, key) => arr.reduce((a, b) => a + n(b[key]), 0);
+const pct = (curr, prev) => n(prev) === 0 ? null : ((n(curr) - n(prev)) / n(prev)) * 100;
 const fmt = (v, type) => {
-  if (v === null || v === undefined) return "–";
-  if (type === "brl") return `R$ ${v.toFixed(2).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
-  if (type === "pct") return `${(v * 100).toFixed(2)}%`;
-  if (type === "dec") return v.toFixed(2);
-  if (type === "int") return Math.round(v).toLocaleString("pt-BR");
-  return v;
+  const num = n(v);
+  if (type === "brl") return `R$ ${num.toFixed(2).replace(".", ",").replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
+  if (type === "pct") return `${(num * 100).toFixed(2)}%`;
+  if (type === "dec") return num.toFixed(2);
+  if (type === "int") return Math.round(num).toLocaleString("pt-BR");
+  return num;
 };
 
 function KPICard({ label, curr, prev, valueType, lowerIsBetter = false }) {
